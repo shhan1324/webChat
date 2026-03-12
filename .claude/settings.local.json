@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(mkdir -p C:/project/web-chat-app/realtime-chat && cd C:/project/web-chat-app/realtime-chat && npm init -y)"
+    ]
+  }
+}

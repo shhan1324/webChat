@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web Chat</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+
+    /* ── 입장 화면 ── */
+    #join-screen {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.1);
+      padding: 40px 36px;
+      width: 340px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    #join-screen h1 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #111827;
+      text-align: center;
+    }
+
+    #join-screen p {
+      font-size: 0.85rem;
+      color: #6b7280;
+      text-align: center;
+    }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+
+    .field label { font-size: 0.82rem; font-weight: 600; color: #374151; }
+
+    .field input {
+      padding: 10px 14px;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+
+    .field input:focus { border-color: #4f46e5; }
+
+    #join-btn {
+      padding: 12px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+    }
+
+    #join-btn:hover { background: #4338ca; }
+
+    /* ── 채팅 화면 ── */
+    #chat-screen { display: none; width: 100%; max-width: 480px; height: 90vh; max-height: 700px; }
+
+    .chat-container {
+      height: 100%;
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 16px 20px;
+      background: #4f46e5;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .chat-header .left { display: flex; align-items: center; gap: 10px; }
+
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #86efac; flex-shrink: 0; }
+
+    .room-name { font-size: 0.95rem; font-weight: 700; }
+
+    .my-nickname { font-size: 0.78rem; opacity: .8; }
+
+    #leave-btn {
+      font-size: 0.78rem;
+      background: rgba(255,255,255,.2);
+      border: none;
+      color: #fff;
+      padding: 5px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background .2s;
+    }
+
+    #leave-btn:hover { background: rgba(255,255,255,.35); }
+
+    /* ── 메시지 목록 ── */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      list-style: none;
+    }
+
+    #messages::-webkit-scrollbar { width: 4px; }
+    #messages::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+
+    .msg-wrap { display: flex; flex-direction: column; max-width: 75%; }
+
+    .msg-wrap.mine { align-self: flex-end; align-items: flex-end; }
+    .msg-wrap.other { align-self: flex-start; align-items: flex-start; }
+
+    .msg-meta { font-size: 0.72rem; color: #9ca3af; margin-bottom: 3px; padding: 0 4px; }
+
+    .msg-bubble {
+      padding: 10px 14px;
+      border-radius: 18px;
+      font-size: 0.9rem;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .mine .msg-bubble {
+      background: #4f46e5;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .other .msg-bubble {
+      background: #f3f4f6;
+      color: #111827;
+      border-bottom-left-radius: 4px;
+    }
+
+    .system-msg {
+      align-self: center;
+      font-size: 0.75rem;
+      color: #9ca3af;
+      padding: 4px 10px;
+      background: #f9fafb;
+      border-radius: 20px;
+    }
+
+    .history-divider {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin: 6px 0;
+    }
+
+    .history-divider::before, .history-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e5e7eb;
+    }
+
+    /* ── 입력창 ── */
+    .chat-input-area {
+      display: flex;
+      gap: 8px;
+      padding: 14px 16px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    #input {
+      flex: 1;
+      padding: 10px 16px;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 24px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+
+    #input:focus { border-color: #4f46e5; }
+
+    #send-btn {
+      padding: 10px 20px;
+      background: #4f46e5;
+      color: #fff;
+      border: none;
+      border-radius: 24px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s;
+    }
+
+    #send-btn:hover { background: #4338ca; }
+  </style>
+</head>
+<body>
+
+  <!-- 입장 화면 -->
+  <div id="join-screen">
+    <h1>💬 Web Chat</h1>
+    <p>닉네임과 방 이름을 입력해 채팅을 시작하세요.</p>
+    <div class="field">
+      <label for="nickname-input">닉네임</label>
+      <input id="nickname-input" type="text" placeholder="예: 홍길동" maxlength="20" />
+    </div>
+    <div class="field">
+      <label for="room-input">방 이름</label>
+      <input id="room-input" type="text" placeholder="예: general" maxlength="30" />
+    </div>
+    <button id="join-btn">입장하기</button>
+  </div>
+
+  <!-- 채팅 화면 -->
+  <div id="chat-screen">
+    <div class="chat-container">
+      <div class="chat-header">
+        <div class="left">
+          <span class="status-dot"></span>
+          <div>
+            <div class="room-name" id="header-room"></div>
+            <div class="my-nickname" id="header-nickname"></div>
+          </div>
+        </div>
+        <button id="leave-btn">나가기</button>
+      </div>
+      <ul id="messages"></ul>
+      <div class="chat-input-area">
+        <input id="input" type="text" placeholder="메시지를 입력하세요..." autocomplete="off" />
+        <button id="send-btn">전송</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    // ── 상태 ──────────────────────────────────────────────────────────────────
+    let myNickname = '';
+    let myRoom = '';
+
+    // ── DOM ───────────────────────────────────────────────────────────────────
+    const joinScreen   = document.getElementById('join-screen');
+    const chatScreen   = document.getElementById('chat-screen');
+    const nicknameInput = document.getElementById('nickname-input');
+    const roomInput    = document.getElementById('room-input');
+    const joinBtn      = document.getElementById('join-btn');
+    const leaveBtn     = document.getElementById('leave-btn');
+    const messages     = document.getElementById('messages');
+    const input        = document.getElementById('input');
+    const sendBtn      = document.getElementById('send-btn');
+    const headerRoom   = document.getElementById('header-room');
+    const headerNick   = document.getElementById('header-nickname');
+
+    // ── 헬퍼 ─────────────────────────────────────────────────────────────────
+    function scrollToBottom() {
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function addSystemMsg(text) {
+      const li = document.createElement('li');
+      li.className = 'system-msg';
+      li.textContent = text;
+      messages.appendChild(li);
+      scrollToBottom();
+    }
+
+    function addMessage(nickname, message, isMine) {
+      const wrap = document.createElement('li');
+      wrap.className = `msg-wrap ${isMine ? 'mine' : 'other'}`;
+
+      const meta = document.createElement('div');
+      meta.className = 'msg-meta';
+      meta.textContent = isMine ? '나' : nickname;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'msg-bubble';
+      bubble.textContent = message;
+
+      wrap.appendChild(meta);
+      wrap.appendChild(bubble);
+      messages.appendChild(wrap);
+      scrollToBottom();
+    }
+
+    function addHistoryDivider() {
+      const li = document.createElement('li');
+      li.className = 'history-divider';
+      li.textContent = '이전 대화';
+      messages.appendChild(li);
+    }
+
+    // ── 입장 ─────────────────────────────────────────────────────────────────
+    function joinRoom() {
+      const nickname = nicknameInput.value.trim();
+      const room = roomInput.value.trim();
+      if (!nickname || !room) return alert('닉네임과 방 이름을 모두 입력해주세요.');
+
+      myNickname = nickname;
+      myRoom = room;
+
+      socket.emit('join room', { room, nickname });
+
+      headerRoom.textContent = `# ${room}`;
+      headerNick.textContent = nickname;
+      messages.innerHTML = '';
+
+      joinScreen.style.display = 'none';
+      chatScreen.style.display = 'block';
+      input.focus();
+    }
+
+    joinBtn.addEventListener('click', joinRoom);
+    roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
+    nicknameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') roomInput.focus(); });
+
+    // ── 나가기 ────────────────────────────────────────────────────────────────
+    leaveBtn.addEventListener('click', () => {
+      myNickname = '';
+      myRoom = '';
+      messages.innerHTML = '';
+      nicknameInput.value = '';
+      roomInput.value = '';
+      chatScreen.style.display = 'none';
+      joinScreen.style.display = 'flex';
+    });
+
+    // ── 메시지 전송 ───────────────────────────────────────────────────────────
+    function sendMessage() {
+      const msg = input.value.trim();
+      if (!msg || !myRoom) return;
+      socket.emit('chat message', msg);
+      input.value = '';
+      input.focus();
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+    // ── 소켓 이벤트 ───────────────────────────────────────────────────────────
+
+    // 이전 대화 내역 수신
+    socket.on('message history', (history) => {
+      if (history.length === 0) return;
+      addHistoryDivider();
+      history.forEach(({ nickname, message }) => {
+        addMessage(nickname, message, nickname === myNickname);
+      });
+
+      const divider = document.createElement('li');
+      divider.className = 'history-divider';
+      divider.textContent = '여기서부터 새 메시지';
+      messages.appendChild(divider);
+
+      scrollToBottom();
+    });
+
+    // 실시간 메시지 수신
+    socket.on('chat message', ({ nickname, message }) => {
+      addMessage(nickname, message, nickname === myNickname);
+    });
+
+    // 시스템 메시지
+    socket.on('system message', (text) => {
+      addSystemMsg(text);
+    });
+
+    socket.on('disconnect', () => {
+      addSystemMsg('서버와 연결이 끊어졌습니다.');
+    });
+  </script>
+</body>
+</html>

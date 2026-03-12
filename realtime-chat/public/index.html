@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Realtime Chat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            kakao: {
+              bg:          '#B2C7D9',
+              mine:        '#FEE500',
+              'mine-text': '#111111',
+              other:       '#FFFFFF',
+            },
+          },
+          borderRadius: { bubble: '18px' },
+          keyframes: {
+            blink: {
+              '0%, 80%, 100%': { opacity: 0 },
+              '40%':           { opacity: 1 },
+            },
+          },
+          animation: {
+            blink: 'blink 1.2s infinite ease-in-out',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    /* 말풍선 꼬리 — 내 메시지 */
+    .bubble-mine::after {
+      content: '';
+      position: absolute;
+      bottom: 6px;
+      right: -6px;
+      border: 6px solid transparent;
+      border-left-color: #FEE500;
+      border-right: 0;
+    }
+    /* 말풍선 꼬리 — 상대방 메시지 */
+    .bubble-other::after {
+      content: '';
+      position: absolute;
+      bottom: 6px;
+      left: -6px;
+      border: 6px solid transparent;
+      border-right-color: #FFFFFF;
+      border-left: 0;
+    }
+
+    #message-list::-webkit-scrollbar { width: 4px; }
+    #message-list::-webkit-scrollbar-thumb {
+      background: rgba(0,0,0,.2);
+      border-radius: 4px;
+    }
+
+    /* 입력 중 점 애니메이션 딜레이 */
+    .dot-1 { animation: blink 1.2s infinite ease-in-out 0s; }
+    .dot-2 { animation: blink 1.2s infinite ease-in-out .2s; }
+    .dot-3 { animation: blink 1.2s infinite ease-in-out .4s; }
+
+    /* 모달 오버레이 */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.5);
+      z-index: 50;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+
+    /* 접속자 패널 슬라이드 */
+    #user-panel {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height .25s ease;
+    }
+    #user-panel.open { max-height: 200px; }
+  </style>
+</head>
+<body class="bg-gray-100 h-screen overflow-hidden">
+
+  <!-- ── 닉네임 모달 ─────────────────────────────────────────────────────── -->
+  <div class="modal-overlay" id="nicknameModal">
+    <div class="bg-white rounded-2xl shadow-2xl w-80 p-8 flex flex-col gap-5">
+      <div>
+        <h2 class="text-lg font-bold text-gray-900 mb-1">👋 환영합니다!</h2>
+        <p class="text-sm text-gray-500">채팅에서 사용할 닉네임을 입력해주세요.</p>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-semibold text-gray-600">닉네임</label>
+        <input id="nickname-modal-input" type="text" maxlength="20" placeholder="예: 홍길동"
+          class="border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 transition-colors" />
+        <span id="nickname-error" class="text-xs text-red-500 hidden">닉네임을 입력해주세요.</span>
+      </div>
+      <button id="nickname-confirm-btn"
+        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl py-2.5 text-sm transition-colors">
+        확인
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 방 입장 화면 ────────────────────────────────────────────────────── -->
+  <div id="join-screen" class="hidden h-screen flex items-center justify-center">
+    <div class="bg-white rounded-2xl shadow-xl w-80 p-8 flex flex-col gap-5">
+      <div>
+        <p id="join-greeting" class="text-sm font-semibold text-indigo-600 mb-1"></p>
+        <h2 class="text-lg font-bold text-gray-900 mb-1">Realtime Chat</h2>
+        <p class="text-sm text-gray-500">입장할 방 이름을 입력하세요.</p>
+      </div>
+      <div class="flex flex-col gap-1">
+        <label class="text-xs font-semibold text-gray-600">방 이름</label>
+        <input id="room-input" type="text" maxlength="30" placeholder="예: general"
+          class="border border-gray-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 transition-colors" />
+        <span class="text-xs text-gray-400">
+          URL 파라미터 <code class="bg-gray-100 px-1 rounded">?room=이름</code>으로 자동 입력됩니다.
+        </span>
+      </div>
+      <button id="join-btn"
+        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl py-2.5 text-sm transition-colors">
+        입장하기
+      </button>
+      <button id="change-nick-btn" class="text-xs text-gray-400 hover:text-indigo-500 transition-colors text-center">
+        닉네임 변경
+      </button>
+    </div>
+  </div>
+
+  <!-- ── 채팅 화면 ──────────────────────────────────────────────────────── -->
+  <div id="chat-screen" class="hidden h-screen flex items-center justify-center">
+    <div class="w-full max-w-xl h-screen flex flex-col p-4">
+
+      <!-- 헤더 -->
+      <div class="bg-indigo-600 text-white rounded-t-2xl px-5 py-3 flex items-center justify-between flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <span class="w-2 h-2 rounded-full bg-green-300 flex-shrink-0"></span>
+          <div>
+            <div id="header-room" class="font-bold text-sm"></div>
+            <div id="header-nickname" class="text-xs opacity-70"></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <!-- 접속자 수 버튼 -->
+          <button id="user-list-toggle"
+            class="flex items-center gap-1.5 text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full transition-colors"
+            title="접속자 목록">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m9-4.13a4 4 0 11-8 0 4 4 0 018 0zm6 4a4 4 0 00-3-3.87" />
+            </svg>
+            <span id="user-count">0</span>명
+          </button>
+          <button id="leave-btn"
+            class="text-xs bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full transition-colors">
+            나가기
+          </button>
+        </div>
+      </div>
+
+      <!-- 접속자 패널 (토글) -->
+      <div id="user-panel" class="bg-indigo-50 border-x border-indigo-100 overflow-y-auto">
+        <div class="px-4 py-2">
+          <p class="text-xs font-semibold text-indigo-400 mb-2 uppercase tracking-wide">접속 중인 사용자</p>
+          <ul id="user-list" class="flex flex-wrap gap-2"></ul>
+        </div>
+      </div>
+
+      <!-- 메시지 목록 -->
+      <ul id="message-list"
+        class="flex-1 overflow-y-auto bg-kakao-bg flex flex-col gap-2 px-4 py-3">
+      </ul>
+
+      <!-- 입력 중 표시 -->
+      <div id="typing-indicator"
+        class="hidden bg-kakao-bg px-5 pb-1 flex items-center gap-1.5 text-xs text-gray-500">
+        <span id="typing-text"></span>
+        <span class="flex gap-0.5 ml-0.5">
+          <span class="dot-1 w-1.5 h-1.5 rounded-full bg-gray-400 inline-block"></span>
+          <span class="dot-2 w-1.5 h-1.5 rounded-full bg-gray-400 inline-block"></span>
+          <span class="dot-3 w-1.5 h-1.5 rounded-full bg-gray-400 inline-block"></span>
+        </span>
+      </div>
+
+      <!-- 입력창 -->
+      <div class="bg-white border-t border-gray-200 rounded-b-2xl px-4 py-3 flex gap-2 flex-shrink-0 items-center">
+        <!-- 이미지 업로드 버튼 -->
+        <input id="file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" />
+        <button id="upload-btn" title="이미지 전송"
+          class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full
+                 text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24"
+               stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14
+                 M8 10a2 2 0 100-4 2 2 0 000 4zm-4 8V6a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2z"/>
+          </svg>
+        </button>
+        <input id="msg-input" type="text" autocomplete="off" placeholder="메시지를 입력하세요..."
+          class="flex-1 border border-gray-200 rounded-full px-4 py-2 text-sm outline-none focus:border-indigo-500 transition-colors" />
+        <button id="send-btn"
+          class="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold rounded-full px-5 py-2 text-sm transition-colors whitespace-nowrap">
+          전송
+        </button>
+      </div>
+
+      <!-- 업로드 진행 바 -->
+      <div id="upload-progress" class="hidden bg-white rounded-b-2xl px-4 pb-2">
+        <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
+          <svg class="w-3.5 h-3.5 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+          </svg>
+          <span id="upload-status">이미지 업로드 중...</span>
+        </div>
+        <div class="w-full bg-gray-100 rounded-full h-1">
+          <div id="progress-bar" class="bg-indigo-500 h-1 rounded-full transition-all duration-300" style="width:0%"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    // ── 상태 ──────────────────────────────────────────────────────────────────
+    let myNickname  = '';
+    let myRoom      = '';
+    let typingTimer = null;
+    let isNearBottom = true;
+
+    const typingUsers = new Set();   // 현재 입력 중인 상대방 닉네임들
+
+    // ── DOM ───────────────────────────────────────────────────────────────────
+    const nicknameModal      = document.getElementById('nicknameModal');
+    const nicknameModalInput = document.getElementById('nickname-modal-input');
+    const nicknameConfirmBtn = document.getElementById('nickname-confirm-btn');
+    const nicknameError      = document.getElementById('nickname-error');
+
+    const joinScreen    = document.getElementById('join-screen');
+    const joinGreeting  = document.getElementById('join-greeting');
+    const roomInput     = document.getElementById('room-input');
+    const joinBtn       = document.getElementById('join-btn');
+    const changeNickBtn = document.getElementById('change-nick-btn');
+
+    const chatScreen      = document.getElementById('chat-screen');
+    const headerRoom      = document.getElementById('header-room');
+    const headerNickname  = document.getElementById('header-nickname');
+    const leaveBtn        = document.getElementById('leave-btn');
+    const messageList     = document.getElementById('message-list');
+    const msgInput        = document.getElementById('msg-input');
+    const sendBtn         = document.getElementById('send-btn');
+
+    const userListToggle  = document.getElementById('user-list-toggle');
+    const userPanel       = document.getElementById('user-panel');
+    const userListEl      = document.getElementById('user-list');
+    const userCount       = document.getElementById('user-count');
+
+    const typingIndicator = document.getElementById('typing-indicator');
+    const typingText      = document.getElementById('typing-text');
+
+    const fileInput       = document.getElementById('file-input');
+    const uploadBtn       = document.getElementById('upload-btn');
+    const uploadProgress  = document.getElementById('upload-progress');
+    const uploadStatus    = document.getElementById('upload-status');
+    const progressBar     = document.getElementById('progress-bar');
+
+    // ── 자동 스크롤 ───────────────────────────────────────────────────────────
+    messageList.addEventListener('scroll', () => {
+      const threshold = 80;
+      isNearBottom =
+        messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= threshold;
+    });
+
+    function scrollToBottom(force = false) {
+      if (force || isNearBottom) messageList.scrollTop = messageList.scrollHeight;
+    }
+
+    // ── 화면 전환 ─────────────────────────────────────────────────────────────
+    function showModal() {
+      nicknameModal.classList.add('active');
+      setTimeout(() => nicknameModalInput.focus(), 50);
+    }
+    function hideModal() { nicknameModal.classList.remove('active'); }
+
+    function showJoinScreen() {
+      joinGreeting.textContent = `${myNickname}님, 안녕하세요!`;
+      const urlRoom = new URLSearchParams(location.search).get('room');
+      if (urlRoom) roomInput.value = urlRoom;
+      chatScreen.classList.add('hidden');
+      joinScreen.classList.remove('hidden');
+      joinScreen.classList.add('flex');
+      roomInput.focus();
+    }
+
+    function showChatScreen() {
+      joinScreen.classList.add('hidden');
+      chatScreen.classList.remove('hidden');
+      chatScreen.classList.add('flex');
+      msgInput.focus();
+    }
+
+    // ── 닉네임 모달 ───────────────────────────────────────────────────────────
+    function confirmNickname() {
+      const val = nicknameModalInput.value.trim();
+      if (!val) { nicknameError.classList.remove('hidden'); nicknameModalInput.focus(); return; }
+      nicknameError.classList.add('hidden');
+      myNickname = val;
+      localStorage.setItem('chat_nickname', val);
+      hideModal();
+      showJoinScreen();
+    }
+
+    nicknameConfirmBtn.addEventListener('click', confirmNickname);
+    nicknameModalInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmNickname(); });
+    changeNickBtn.addEventListener('click', () => {
+      joinScreen.classList.add('hidden');
+      nicknameModalInput.value = myNickname;
+      showModal();
+    });
+
+    // ── 방 입장 ───────────────────────────────────────────────────────────────
+    function joinRoom() {
+      const room = roomInput.value.trim();
+      if (!room) { roomInput.focus(); return; }
+      myRoom = room;
+      socket.emit('join room', { room, nickname: myNickname });
+    }
+
+    joinBtn.addEventListener('click', joinRoom);
+    roomInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') joinRoom(); });
+
+    // ── 접속자 목록 렌더 ──────────────────────────────────────────────────────
+    function renderUserList(users) {
+      userCount.textContent = users.length;
+      userListEl.innerHTML  = '';
+      users.forEach((name) => {
+        const li = document.createElement('li');
+        const isMe = name === myNickname;
+        li.className = [
+          'flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full',
+          isMe
+            ? 'bg-indigo-500 text-white font-semibold'
+            : 'bg-white text-gray-700 border border-gray-200',
+        ].join(' ');
+        li.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${isMe ? 'bg-green-300' : 'bg-green-400'}"></span>${name}${isMe ? ' (나)' : ''}`;
+        userListEl.appendChild(li);
+      });
+    }
+
+    // 접속자 패널 토글
+    userListToggle.addEventListener('click', () => {
+      userPanel.classList.toggle('open');
+    });
+
+    // ── 입력 중 표시 렌더 ─────────────────────────────────────────────────────
+    function renderTypingIndicator() {
+      const users = Array.from(typingUsers);
+      if (users.length === 0) {
+        typingIndicator.classList.add('hidden');
+        return;
+      }
+      typingIndicator.classList.remove('hidden');
+      if (users.length === 1) {
+        typingText.textContent = `${users[0]}님이 입력 중입니다`;
+      } else if (users.length === 2) {
+        typingText.textContent = `${users[0]}, ${users[1]}님이 입력 중입니다`;
+      } else {
+        typingText.textContent = `${users[0]} 외 ${users.length - 1}명이 입력 중입니다`;
+      }
+      scrollToBottom();
+    }
+
+    // ── 메시지 렌더 헬퍼 ──────────────────────────────────────────────────────
+    function addSystemMsg(text) {
+      const li = document.createElement('li');
+      li.className = 'self-center text-xs text-gray-500 bg-black/10 rounded-full px-3 py-1';
+      li.textContent = text;
+      messageList.appendChild(li);
+      scrollToBottom();
+    }
+
+    function addDivider(text) {
+      const li = document.createElement('li');
+      li.className = 'flex items-center gap-2 text-xs text-gray-400 my-1';
+      li.innerHTML = `
+        <span class="flex-1 h-px bg-black/10"></span>
+        <span>${text}</span>
+        <span class="flex-1 h-px bg-black/10"></span>`;
+      messageList.appendChild(li);
+    }
+
+    // 말풍선 wrapper 생성 (텍스트/이미지 공통)
+    function createBubbleWrap(nickname, isMine) {
+      const li = document.createElement('li');
+      li.className = `flex flex-col gap-0.5 max-w-[70%] ${isMine ? 'self-end items-end' : 'self-start items-start'}`;
+
+      if (!isMine) {
+        const name = document.createElement('span');
+        name.className = 'text-xs text-gray-600 font-medium px-1';
+        name.textContent = nickname;
+        li.appendChild(name);
+      }
+      return li;
+    }
+
+    function addMessage(nickname, message, isMine) {
+      const li = createBubbleWrap(nickname, isMine);
+
+      const bubble = document.createElement('div');
+      bubble.className = [
+        'relative px-3.5 py-2 text-sm leading-relaxed break-words rounded-bubble shadow-sm',
+        isMine
+          ? 'bubble-mine bg-kakao-mine text-kakao-mine-text rounded-br-sm'
+          : 'bubble-other bg-kakao-other text-gray-900 rounded-bl-sm',
+      ].join(' ');
+      bubble.textContent = message;
+
+      li.appendChild(bubble);
+      messageList.appendChild(li);
+      scrollToBottom();
+    }
+
+    function addImageMessage(nickname, imageUrl, isMine) {
+      const li = createBubbleWrap(nickname, isMine);
+
+      const wrap = document.createElement('div');
+      wrap.className = [
+        'relative rounded-2xl overflow-hidden shadow-sm cursor-pointer',
+        isMine ? 'rounded-br-sm' : 'rounded-bl-sm',
+      ].join(' ');
+
+      const img = document.createElement('img');
+      img.src       = imageUrl;
+      img.alt       = '이미지';
+      img.className = 'max-w-[220px] max-h-[280px] object-cover block';
+      img.loading   = 'lazy';
+      // 클릭 시 원본 이미지 새 탭에서 열기
+      img.addEventListener('click', () => window.open(imageUrl, '_blank'));
+      // 로드 실패 시 대체 텍스트
+      img.addEventListener('error', () => {
+        wrap.textContent = '이미지를 불러올 수 없습니다.';
+        wrap.className += ' px-3 py-2 text-xs text-gray-500 bg-white';
+      });
+      img.addEventListener('load', () => scrollToBottom());
+
+      wrap.appendChild(img);
+      li.appendChild(wrap);
+      messageList.appendChild(li);
+      scrollToBottom();
+    }
+
+    // ── 입장 확인 + 히스토리 ──────────────────────────────────────────────────
+    socket.on('room joined', ({ room, nickname, history, userList }) => {
+      headerRoom.textContent     = `# ${room}`;
+      headerNickname.textContent = nickname;
+      messageList.innerHTML      = '';
+      typingUsers.clear();
+      renderTypingIndicator();
+      isNearBottom = true;
+
+      renderUserList(userList);
+
+      if (history.length > 0) {
+        addDivider(`이전 대화 ${history.length}개`);
+        history.forEach(({ username, message, type }) => {
+          const isMine = username === myNickname;
+          type === 'image'
+            ? addImageMessage(username, message, isMine)
+            : addMessage(username, message, isMine);
+        });
+        addDivider('여기서부터 새 메시지');
+      }
+
+      window.history.replaceState(null, '', `?room=${encodeURIComponent(room)}`);
+      showChatScreen();
+      scrollToBottom(true);
+    });
+
+    // ── 나가기 ────────────────────────────────────────────────────────────────
+    leaveBtn.addEventListener('click', () => {
+      myRoom = '';
+      messageList.innerHTML = '';
+      userPanel.classList.remove('open');
+      typingUsers.clear();
+      renderTypingIndicator();
+      window.history.replaceState(null, '', location.pathname);
+      showJoinScreen();
+    });
+
+    // ── 메시지 전송 ───────────────────────────────────────────────────────────
+    function sendMessage() {
+      const message = msgInput.value.trim();
+      if (!message || !myRoom) return;
+
+      // 메시지 전송 시 입력 중 상태 해제
+      clearTimeout(typingTimer);
+      socket.emit('stop typing');
+
+      socket.emit('chat message', { message });
+      addMessage(myNickname, message, true);
+      msgInput.value = '';
+      msgInput.focus();
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+    // ── 입력 중 감지 (디바운스 2초) ──────────────────────────────────────────
+    msgInput.addEventListener('input', () => {
+      if (!myRoom) return;
+
+      if (msgInput.value.trim()) {
+        socket.emit('typing');
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => {
+          socket.emit('stop typing');
+        }, 2000);
+      } else {
+        clearTimeout(typingTimer);
+        socket.emit('stop typing');
+      }
+    });
+
+    // ── 이미지 업로드 ─────────────────────────────────────────────────────────
+    uploadBtn.addEventListener('click', () => {
+      if (!myRoom) return;
+      fileInput.value = '';   // 같은 파일 재선택 허용
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file || !myRoom) return;
+
+      if (!file.type.startsWith('image/')) {
+        return alert('이미지 파일만 업로드할 수 있습니다.');
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        return alert('파일 크기는 5MB 이하여야 합니다.');
+      }
+
+      const formData = new FormData();
+      formData.append('image',    file);
+      formData.append('room',     myRoom);
+      formData.append('nickname', myNickname);
+
+      uploadProgress.classList.remove('hidden');
+      uploadStatus.textContent = '이미지 업로드 중...';
+      uploadBtn.disabled = true;
+
+      try {
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+              const pct = Math.round((e.loaded / e.total) * 100);
+              progressBar.style.width  = `${pct}%`;
+              uploadStatus.textContent = `업로드 중... ${pct}%`;
+            }
+          });
+
+          xhr.addEventListener('load', () => {
+            xhr.status >= 200 && xhr.status < 300
+              ? resolve(JSON.parse(xhr.responseText))
+              : reject(new Error(JSON.parse(xhr.responseText).error || '업로드 실패'));
+          });
+
+          xhr.addEventListener('error', () => reject(new Error('네트워크 오류')));
+
+          xhr.open('POST', '/upload');
+          xhr.send(formData);
+        });
+
+        uploadStatus.textContent = '업로드 완료!';
+        progressBar.style.width  = '100%';
+
+      } catch (err) {
+        alert(`업로드 실패: ${err.message}`);
+        uploadStatus.textContent = '업로드 실패';
+      } finally {
+        setTimeout(() => {
+          uploadProgress.classList.add('hidden');
+          progressBar.style.width = '0%';
+          uploadBtn.disabled = false;
+        }, 800);
+      }
+    });
+
+    // ── 소켓 이벤트 수신 ──────────────────────────────────────────────────────
+    socket.on('chat message', ({ nickname, message }) => {
+      if (nickname === myNickname) return;
+      typingUsers.delete(nickname);
+      renderTypingIndicator();
+      addMessage(nickname, message, false);
+    });
+
+    socket.on('chat image', ({ nickname, imageUrl }) => {
+      // 서버가 room 전체에 emit → 본인 포함 모두 렌더링
+      addImageMessage(nickname, imageUrl, nickname === myNickname);
+    });
+
+    socket.on('system message', (text) => addSystemMsg(text));
+
+    socket.on('user list', (users) => renderUserList(users));
+
+    socket.on('typing', ({ nickname }) => {
+      typingUsers.add(nickname);
+      renderTypingIndicator();
+    });
+
+    socket.on('stop typing', ({ nickname }) => {
+      typingUsers.delete(nickname);
+      renderTypingIndicator();
+    });
+
+    socket.on('disconnect', () => {
+      addSystemMsg('서버와 연결이 끊어졌습니다.');
+      typingUsers.clear();
+      renderTypingIndicator();
+    });
+
+    // ── 초기 진입 ─────────────────────────────────────────────────────────────
+    const saved = localStorage.getItem('chat_nickname');
+    if (saved) {
+      myNickname = saved;
+      showJoinScreen();
+    } else {
+      showModal();
+    }
+  </script>
+</body>
+</html>

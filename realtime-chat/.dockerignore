@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log*
+
+# 런타임에 생성되는 파일
+chat.db
+data/
+public/uploads/
+
+# 개발/배포 도구
+.git
+.gitignore
+ecosystem.config.js
+start.sh
+
+# 로그
+logs/
+*.log

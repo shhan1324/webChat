@@ -1,0 +1,49 @@
+services:
+
+  # ── Node.js 채팅 서버 ────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: realtime-chat-app
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      DB_PATH: /app/data/chat.db      # SQLite 파일 → 볼륨에 저장
+      DATA_DIR: /app/data
+    volumes:
+      - db_data:/app/data             # SQLite DB 영속성
+      - uploads_data:/app/public/uploads   # 업로드 이미지 영속성
+    expose:
+      - "3000"                        # Nginx에서만 접근 (외부에 직접 노출 안 함)
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Nginx 리버스 프록시 ───────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: realtime-chat-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"                       # 외부 80 → 컨테이너 80
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro   # 설정 파일 읽기 전용 마운트
+    depends_on:
+      app:
+        condition: service_healthy    # app 헬스체크 통과 후 Nginx 시작
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+# ── 네임드 볼륨 ──────────────────────────────────────────────────────────────
+volumes:
+  db_data:      # SQLite DB 파일
+  uploads_data: # 업로드된 이미지 파일
